@@ -1,5 +1,15 @@
 #include <stdio.h>
 
+#define CUDA_CHECK(call) \
+{ \
+    cudaError_t error = call; \
+    if (error != cudaSuccess) { \
+        printf("Error: %s:%d, ", __FILE__, __LINE__); \
+        printf("code:%d, reason:%s\n", error, cudaGetErrorString(error)); \
+        exit(1); \
+    } \
+}
+
 __global__ void vec_add(float *A, float *B, float *C, int N) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < N) {
@@ -8,7 +18,7 @@ __global__ void vec_add(float *A, float *B, float *C, int N) {
 }
 
 int main() {
-    int N = 1024;
+    int N = 1024 * 1024 * 1024;
     size_t size = N * sizeof(float);
     
     float *h_A, *h_B, *h_C;
@@ -30,20 +40,22 @@ int main() {
     // later inside the GPU, but not here. This is because
     // the blocks are allocated to a Streaming Multiprocessor
     // only after the kernel is launched.
-    cudaMalloc(&d_A, size);
-    cudaMalloc(&d_B, size);
-    cudaMalloc(&d_C, size);
+    CUDA_CHECK(cudaMalloc(&d_A, size));
+    CUDA_CHECK(cudaMalloc(&d_B, size));
+    CUDA_CHECK(cudaMalloc(&d_C, size));
     
-    cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+    CUDA_CHECK(cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice));
     
     // Launch the kernel
-    int threads = 256;
-    int blocks = (N + threads - 1) / threads;
+    const int threads = 1024;
+    const int blocks = (N + threads - 1) / threads;
     vec_add<<<blocks, threads>>>(d_A, d_B, d_C, N);
+    CUDA_CHECK(cudaGetLastError());
     
     // Copy the results back from the GPU
-    cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_C, d_C, size, cudaMemcpyDeviceToHost));
     
     // Verification
     for (int i = 0; i < 5; i++) {
@@ -51,7 +63,9 @@ int main() {
     }
     printf("\n");
     
-    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+    CUDA_CHECK(cudaFree(d_A)); 
+    CUDA_CHECK(cudaFree(d_B)); 
+    CUDA_CHECK(cudaFree(d_C));
     free(h_A); free(h_B); free(h_C);
     
     return 0;
