@@ -43,10 +43,10 @@ __global__ void tiled_gemm(float *A,
 		// and column of B's tile is assigned to a warp. Warp 0 (threads 0-31)
 		// loads row 0 of A's tile and col 0 of B's tile.
 		int tile_a_row = start_row + cur_warp_idx;
-		int tile_a_col = t*TILESZ + thread_idx_in_warp;
+		int tile_a_col = t + thread_idx_in_warp;
 
 		int tile_b_col = start_col + cur_warp_idx;
-		int tile_b_row = t*TILESZ + thread_idx_in_warp;
+		int tile_b_row = t + thread_idx_in_warp;
 
 		if ((tile_a_row < M && tile_a_col < K) &&
 			(tile_b_row < K && tile_b_col < N)) {
