@@ -1,0 +1,10 @@
+{
+  "lsp": {
+    "clangd": {
+      "initialization_options": {
+        "compileCommands": "build/compile_commands.json",
+        "fallbackFlags": ["-Iinclude"],
+      },
+    },
+  },
+}

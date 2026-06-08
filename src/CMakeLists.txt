@@ -5,7 +5,8 @@ add_library(gemm
 )
 
 target_include_directories(gemm
-  PUBLIC ${CMAKE_SOURCE_DIR}/include
+  PUBLIC
+  ${CMAKE_SOURCE_DIR}/include
 )
 
 target_link_libraries(gemm
