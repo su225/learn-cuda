@@ -1,0 +1,22 @@
+cmake_minimum_required(VERSION 3.28)
+
+project(cuda-learning LANGUAGES CXX CUDA)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+find_package(CUDAToolkit 13.1 REQUIRED)
+message(STATUS "Found CUDA version: ${CUDAToolkit_VERSION}")
+
+include_directories(
+    ${CMAKE_SOURCE_DIR}/include
+)
+add_subdirectory(src)
+
+# enable_testing()
+# add_subdirectory(test)
+# include(cmake/FetchGoogleTest.cmake)
