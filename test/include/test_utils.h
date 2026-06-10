@@ -1,9 +1,8 @@
 #pragma once
 
 #include <vector>
-#include <stdexcept>
 
-std::vector<float> random_matrix(int size, float scale = 1.0f);
+std::vector<float> random_matrix(int size, float scale = 1.0f, int seed = 42);
 
 void compare(
     const std::vector<float>& a,

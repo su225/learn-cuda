@@ -1,11 +1,19 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-#include "test_utils.h"
 #include "kernels/gemm.h"
 
-void run_gemm_test(int M, int N, int K)
+#include "test_utils.h"
+#include "gemm_test_case.h"
+
+TEST_P(GemmTest, NaiveKernel)
 {
+    auto tc = GetParam();
+
+    int M = tc.M;
+    int N = tc.N;
+    int K = tc.K;
+
     std::vector<float> A = random_matrix(M * K);
     std::vector<float> B = random_matrix(K * N);
     std::vector<float> C_actual(M * N, 0);
@@ -17,11 +25,12 @@ void run_gemm_test(int M, int N, int K)
     compare(C_actual, C_expected, 1e-4f);
 }
 
-TEST(GEMM, Naive_128x128)
-{
-    run_gemm_test(128, 128, 128);
-}
-
-TEST(GEMM, Naive_1024x1024) {
-    run_gemm_test(1024, 1024, 1024);
-}
+INSTANTIATE_TEST_SUITE_P(
+    Correctness,
+    GemmTest,
+    ::testing::Values(
+        GemmCase{.M = 128, .N = 128, .K = 128},
+        GemmCase{.M = 512, .N = 512, .K = 512},
+        GemmCase{.M = 1024, .N = 1024, .K = 1024}
+    )
+);

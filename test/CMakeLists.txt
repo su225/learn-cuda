@@ -19,5 +19,7 @@ target_link_libraries(gpu_tests
     CUDA::cublasLt
 )
 
+set_property(GLOBAL PROPERTY CTEST_OUTPUT_ON_FAILURE ON)
+
 enable_testing()
 gtest_discover_tests(gpu_tests)
