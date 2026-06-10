@@ -6,45 +6,17 @@
 #include <cuda_runtime.h>
 #include <cublasLt.h>
 
-#define CUDA_CHECK(call)                                                   \
-do {                                                                       \
-	cudaError_t error = (call);                                              \
-	if (error != cudaSuccess) {                                            \
-		std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__       \
-				  << " code=" << static_cast<int>(error)                   \
-				  << " reason=" << cudaGetErrorString(error) << std::endl; \
-		std::exit(EXIT_FAILURE);                                           \
-	}                                                                      \
-} while (0);
+#include "common.h"
 
-#define CUBLAS_CHECK(call) \
-do { \
-	cublasStatus_t st = (call); \
-	if (st != CUBLAS_STATUS_SUCCESS) { \
-		std::cerr << "cuBLASLt error: " << st << std::endl; \
-		std::exit(EXIT_FAILURE); \
-	} \
-} while (0);
-
-#define INDEX(i,j,r,c) ((i*c + j))
-
-int main() {
-	int M = 1024;
-	int N = 1024;
-	int K = 1024;
-
-	std::vector<float> A(M * K);
-	std::vector<float> B(K * N);
-	std::vector<float> C(M * N);
-	for (int i = 0; i < M; i++)
-		for (int j = 0; j < K; j++)
-			A[INDEX(i,j,M,K)] = 1.0*(i+j)/(M+K);
-
-	for (int i = 0; i < K; i++)
-		for (int j = 0; j < N; j++)
-			B[INDEX(i,j,K,N)] = 1.0*(i+j)/(K+N);
-
-	float *d_A, *d_B, *d_C;
+void cuBLASLt_gemm(
+    const std::vector<float>& A,
+    const std::vector<float>& B,
+    std::vector<float>& C,
+    int M,
+    int N,
+    int K
+) {
+   	float *d_A, *d_B, *d_C;
 	CUDA_CHECK(cudaMalloc(&d_A, A.size() * sizeof(float)));
 	CUDA_CHECK(cudaMalloc(&d_B, B.size() * sizeof(float)));
 	CUDA_CHECK(cudaMalloc(&d_C, C.size() * sizeof(float)));
@@ -101,8 +73,7 @@ int main() {
 		&heuristic,
 		&returned));
 	if (returned == 0) {
-		std::cerr << "No algorithm found" << std::endl;
-		return EXIT_FAILURE;
+	    throw std::runtime_error("No algorithm found");
 	}
 
 	// -- actual GEMM --
@@ -140,5 +111,4 @@ int main() {
     cudaFree(d_C);
 
     cublasLtDestroy(handle);
-    return 0;
 }

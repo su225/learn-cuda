@@ -14,14 +14,12 @@
 
 #define TILESZ 32
 
-__global__ void tiled_gemm(float *A,
-	            	  	   float *B,
-	                  	   float *C,
-	                  	   int M,
-	            	  	   int N,
-	            	  	   int K,
-	            	  	   float alpha,
-	            	  	   float beta) {
+__global__ void tiled_gemm_kernel(float *A,
+	            	  	          float *B,
+					              float *C,
+	                  	          int M,
+								  int N,
+	            	  	          int K) {
 	__shared__ float tile_A[TILESZ][TILESZ]; // 32x32x4 = 4KiB
 	__shared__ float tile_B[TILESZ][TILESZ]; // 32x32x4 = 4KiB
 
@@ -107,7 +105,7 @@ int main() {
 		(N + blockDim.x - 1) / blockDim.x,
 		(M + blockDim.y - 1) / blockDim.y
 	);
-	tiled_gemm<<<gridDim, blockDim>>>(d_A, d_B, d_C, M, N, K, 1.0, 1.0);
+	tiled_gemm_kernel<<<gridDim, blockDim>>>(d_A, d_B, d_C, M, N, K);
 	CUDA_CHECK(cudaDeviceSynchronize());
 	CUDA_CHECK(cudaMemcpy(h_C, d_C, size_c, cudaMemcpyDeviceToHost));
 

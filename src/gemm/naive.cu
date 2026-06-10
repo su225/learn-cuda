@@ -1,16 +1,15 @@
 #include <cstdio>
 #include <vector>
-#include <iostream>
 
 #include <cuda_runtime.h>
 #include "common.h"
 
-__global__ void naive_gemm(float *A,
-	            	  	   float *B,
-	                  	   float *C,
-	                  	   int M,
-	            	  	   int K,
-	            	  	   int N) {
+__global__ void naive_gemm_kernel(float *A,
+	            	  	          float *B,
+					              float *C,
+	                  	          int M,
+								  int N,
+	            	  	          int K) {
 	int c = blockIdx.x * blockDim.x + threadIdx.x;
 	int r = blockIdx.y * blockDim.y + threadIdx.y;
 	if (r < M && c < N) {
@@ -22,33 +21,29 @@ __global__ void naive_gemm(float *A,
 	}
 }
 
-void launch_naive_gemm(
+void naive_gemm(
     const std::vector<float>& A,
     const std::vector<float>& B,
     std::vector<float>& C,
     int M,
-    int K,
-    int N
+    int N,
+    int K
 ) {
-    size_t sizeA = M*K * sizeof(float);
-    size_t sizeB = K*N * sizeof(float);
-    size_t sizeC = M*N * sizeof(float);
-
     float *dA, *dB, *dC;
 
-    CUDA_CHECK(cudaMalloc(&dA, sizeA));
-	CUDA_CHECK(cudaMalloc(&dB, sizeB));
-	CUDA_CHECK(cudaMalloc(&dC, sizeC));
+    CUDA_CHECK(cudaMalloc(&dA, A.size() * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dB, B.size() * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dC, C.size() * sizeof(float)));
 
-	CUDA_CHECK(cudaMemcpy(dA, A.data(), M*K*sizeof(float), cudaMemcpyHostToDevice));
-	CUDA_CHECK(cudaMemcpy(dB, B.data(), K*N*sizeof(float), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(dA, A.data(), A.size()*sizeof(float), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(dB, B.data(), B.size()*sizeof(float), cudaMemcpyHostToDevice));
 
 	dim3 blockDim(32, 32);
 	dim3 gridDim(
-		(N + blockDim.x - 1) / blockDim.x,
-		(M + blockDim.y - 1) / blockDim.y
+		(N + blockDim.x - 1) / blockDim.x, // columns
+		(M + blockDim.y - 1) / blockDim.y  // rows
 	);
-	naive_gemm<<<gridDim, blockDim>>>(dA, dB, dC, M, K, N);
+	naive_gemm_kernel<<<gridDim, blockDim>>>(dA, dB, dC, M, N, K);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	CUDA_CHECK(cudaMemcpy(C.data(), dC, sizeC, cudaMemcpyDeviceToHost));
+	CUDA_CHECK(cudaMemcpy(C.data(), dC, C.size()*sizeof(float), cudaMemcpyDeviceToHost));
 }

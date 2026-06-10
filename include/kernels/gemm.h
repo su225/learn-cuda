@@ -2,29 +2,29 @@
 
 #include <vector>
 
-void launch_naive_gemm(
+void naive_gemm(
     const std::vector<float>& A,
     const std::vector<float>& B,
     std::vector<float>& C,
     int M,
-    int K,
-    int N
+    int N,
+    int K
 );
 
-void launch_tiled_gemm(
+void tiled_gemm(
     const std::vector<float>& A,
     const std::vector<float>& B,
     std::vector<float>& C,
     int M,
-    int K,
-    int N
+    int N,
+    int K
 );
 
-void launch_cuBLASLt_gemm(
+void cuBLASLt_gemm(
     const std::vector<float>& A,
     const std::vector<float>& B,
     std::vector<float>& C,
     int M,
-    int K,
-    int N
+    int N,
+    int K
 );

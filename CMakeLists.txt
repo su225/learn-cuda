@@ -21,6 +21,6 @@ include_directories(
 )
 add_subdirectory(src)
 
-# enable_testing()
-# add_subdirectory(test)
-# include(cmake/FetchGoogleTest.cmake)
+include(cmake/FetchGoogleTest.cmake)
+enable_testing()
+add_subdirectory(test)
