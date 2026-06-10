@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <vector>
+#include <iostream>
 
 #include <cuda_runtime.h>
 #include "common.h"
