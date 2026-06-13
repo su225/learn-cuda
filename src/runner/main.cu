@@ -84,11 +84,14 @@ int main(int argc, char** argv) {
         std::vector<float> c(args.M * args.N);
 
         if (args.kernel == "naive") {
-            std::cout << "Running naive GEMM\n";
+            std::cout << "Running naive GEMM" << std::endl;
             naive_gemm(a, b, c, args.M, args.N, args.K);
         } else if (args.kernel == "tiled") {
-            std::cout << "Running tiled GEMM\n";
-            // tiled_gemm(a, b, c, args.M, args.N, args.K);
+            std::cout << "Running tiled GEMM" << std::endl;
+            tiled_gemm(a, b, c, args.M, args.N, args.K);
+        } else if (args.kernel == "cublas") {
+            std::cout << "Running cuBLASLt GEMM" << std::endl;
+            cuBLASLt_gemm(a, b, c, args.M, args.N, args.K);
         } else {
             throw std::runtime_error("Unknown kernel: " + args.kernel);
         }
