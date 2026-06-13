@@ -4,6 +4,7 @@
 #include "kernels/gemm.h"
 
 #include "test_utils.h"
+#include "random_matrix.h"
 #include "gemm_test_case.h"
 
 TEST_P(GemmTest, NaiveKernel)
