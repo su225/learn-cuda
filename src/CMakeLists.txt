@@ -2,6 +2,7 @@ add_library(gpu_kernels
   gemm/naive.cu
   gemm/tiled.cu
   gemm/cublas.cu
+  common.cpp
 )
 
 target_include_directories(gpu_kernels

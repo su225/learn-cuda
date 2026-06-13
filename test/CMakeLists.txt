@@ -1,6 +1,7 @@
 add_executable(gpu_tests
     main.cpp
     gemm/test_naive_gemm.cu
+    gemm/test_tiled_gemm.cu
     src/test_utils.cu
 )
 

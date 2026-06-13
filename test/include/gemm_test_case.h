@@ -8,6 +8,4 @@ struct GemmCase {
 
 class GemmTest : public ::testing::TestWithParam<GemmCase> {};
 
-std::ostream& operator<<(std::ostream& os, const GemmCase& c) {
-    return os << "M=" << c.M << "_N=" << c.N << "_K=" << c.K;
-}
+std::ostream& operator<<(std::ostream& os, const GemmCase& c);

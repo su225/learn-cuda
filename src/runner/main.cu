@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "random_matrix.h"
+#include "common.h"
 #include "kernels/gemm.h"
 
 struct Args {
@@ -92,14 +92,7 @@ int main(int argc, char** argv) {
         } else {
             throw std::runtime_error("Unknown kernel: " + args.kernel);
         }
-        for (int i = 0; i < 10 && i < args.M; i++) {
-            for (int j = 0; j < 10 && i < args.N; j++) {
-                std::cout << std::fixed
-                    << std::setprecision(4) << std::setw(8) << std::setfill(' ')
-                    << c[i*args.N + j] << ' ';
-            }
-            std::cout << std::endl;
-        }
+        print_matrix(c, args.M, args.N, 10, 10);
         return 0;
     } catch (const std::exception& ex) {
         std::cerr << "Error: " << ex.what() << '\n';

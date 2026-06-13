@@ -1,9 +1,9 @@
 #include <iostream>
-#include <iomanip>
 #include <vector>
 #include <cstdlib>
 
 #include <cuda_runtime.h>
+#include <cublas_v2.h>
 #include <cublasLt.h>
 
 #include "common.h"
@@ -96,14 +96,6 @@ void cuBLASLt_gemm(
         0));
 
 	cudaMemcpy(C.data(), d_C, C.size() * sizeof(float), cudaMemcpyDeviceToHost);
-
-	for (int i = 0; i < 15; i++) {
-    	for (int j = 0; j < 15; j++) {
-        	std::cout << std::fixed << std::setprecision(4)
-            	      << C[INDEX(i,j,M,N)] << " ";
-    	}
-    	std::cout << std::endl;
-	}
 
 	cudaFree(workspace);
     cudaFree(d_A);

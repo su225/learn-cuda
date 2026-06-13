@@ -3,8 +3,8 @@
 
 #include "kernels/gemm.h"
 
+#include "common.h"
 #include "test_utils.h"
-#include "random_matrix.h"
 #include "gemm_test_case.h"
 
 TEST_P(GemmTest, NaiveKernel)
@@ -15,15 +15,15 @@ TEST_P(GemmTest, NaiveKernel)
     int N = tc.N;
     int K = tc.K;
 
-    std::vector<float> A = random_matrix(M * K);
-    std::vector<float> B = random_matrix(K * N);
+    std::vector<float> A = random_matrix(M * K, 1.0, 42);
+    std::vector<float> B = random_matrix(K * N, 1.0, 42);
     std::vector<float> C_actual(M * N, 0);
     std::vector<float> C_expected(M * N, 0);
 
     naive_gemm(A, B, C_actual, M, N, K);
     cuBLASLt_gemm(A, B, C_expected, M, N, K);
 
-    compare(C_actual, C_expected, 1e-4f);
+    compare(C_actual, C_expected, M, N, 1e-4f);
 }
 
 INSTANTIATE_TEST_SUITE_P(
