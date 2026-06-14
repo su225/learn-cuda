@@ -1,3 +1,10 @@
+function(enable_cuda_debug target)
+  target_compile_options(${target} PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+    $<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:CUDA>>:-G>
+  )
+endfunction()
+
 add_library(gpu_kernels
   gemm/naive.cu
   gemm/tiled.cu
@@ -18,12 +25,14 @@ target_link_libraries(gpu_kernels
 # kernels are binaries
 
 add_executable(gpu_runner
-    runner/main.cu
+  runner/main.cu
 )
 
-target_link_libraries(gpu_runner
-    PRIVATE
+target_link_libraries(gpu_runner PRIVATE
     gpu_kernels
     CUDA::cublas
     CUDA::cublasLt
 )
+
+enable_cuda_debug(gpu_kernels)
+enable_cuda_debug(gpu_runner)
