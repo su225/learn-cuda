@@ -18,9 +18,6 @@ __global__ void tiled_gemm_kernel(float *A,
 	int start_row = blockDim.y * blockIdx.y;
 	int start_col = blockDim.x * blockIdx.x;
 
-	int cur_warp_idx = threadIdx.y; 	  // y dimension represents the row. 1 warp = 1 row.
-	int thread_idx_in_warp = threadIdx.x; // x dimension represents the col.
-
 	float acc = 0.0;
 
 	// Cooperatively load the 32x32 tile into shared memory.
@@ -32,28 +29,42 @@ __global__ void tiled_gemm_kernel(float *A,
 		// size of 32x32 with 32 threads forming a warp, each row of A's tile
 		// and column of B's tile is assigned to a warp. Warp 0 (threads 0-31)
 		// loads row 0 of A's tile and col 0 of B's tile.
-		int tile_a_row = start_row + cur_warp_idx;
-		int tile_a_col = t + thread_idx_in_warp;
+		int tile_a_row = start_row + threadIdx.y;
+		int tile_a_col = t + threadIdx.x;
+		int tile_b_row = t + threadIdx.y;
+		int tile_b_col = start_col + threadIdx.x;
 
-		int tile_b_col = start_col + cur_warp_idx;
-		int tile_b_row = t + thread_idx_in_warp;
+		if (tile_a_row < M && tile_a_col < K) {
+		    tile_A[threadIdx.y][threadIdx.x] = A[tile_a_row * K + tile_a_col];
+		} else {
+		    tile_A[threadIdx.y][threadIdx.x] = 0.0f;
+		}
 
-		if ((tile_a_row < M && tile_a_col < K) &&
-			(tile_b_row < K && tile_b_col < N)) {
-			tile_A[threadIdx.y][threadIdx.x] = A[tile_a_row * K + tile_a_col];
-			tile_B[threadIdx.y][threadIdx.x] = B[tile_b_row * N + tile_b_col];
+		if (tile_b_row < K && tile_b_col < N) {
+		    tile_B[threadIdx.y][threadIdx.x] = B[tile_b_row * N + tile_b_col];
+		} else {
+		    tile_B[threadIdx.y][threadIdx.x] = 0.0f;
 		}
 		__syncthreads();
 
 		// Now perform matrix multiplication
 		for (int k = 0; k < TILESZ; k++) {
-			acc += tile_A[cur_warp_idx][k] * tile_B[k][cur_warp_idx];
+			acc += tile_A[threadIdx.y][k] * tile_B[k][threadIdx.x];
 		}
+		// Why syncthreads again? This is to prevent race conditions. Imagine two
+		// threads computing this kernel. One of them finishes computing partial
+		// product through the tile while the other one is still reading from both
+		// tile_A and tile_B. Without this __syncthreads(), the thread which finished
+		// early will start loading and perhaps even rewriting the locations currently
+		// read by the other, slower thread leading to incorrect results.
+		__syncthreads();
 	}
 
 	int cur_row = start_row + threadIdx.y;
 	int cur_col = start_col + threadIdx.x;
-	C[cur_row*N + cur_col] = acc;
+	if (cur_row < M && cur_col < N) {
+	    C[cur_row*N + cur_col] = acc;
+	}
 }
 
 void tiled_gemm(
