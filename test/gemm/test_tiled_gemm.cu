@@ -32,6 +32,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         GemmCase{.M = 128, .N = 128, .K = 128},
         GemmCase{.M = 512, .N = 512, .K = 512},
-        GemmCase{.M = 1024, .N = 1024, .K = 1024}
+        GemmCase{.M = 1024, .N = 1024, .K = 1024},
+        GemmCase{.M = 2048, .N = 2048, .K = 2048}
     )
 );
