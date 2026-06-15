@@ -15,7 +15,7 @@ __global__ void matrix_addition(float *A, float *B, float *C, int M, int N) {
 	int rowIdx = blockIdx.y * blockDim.y + threadIdx.y;
 	if (rowIdx < M && colIdx < N) {
 		int elemIdx = rowIdx * N + colIdx;
-		C[elemIdx] = A[elemIdx] + B[elemIdx]; 
+		C[elemIdx] = A[elemIdx] + B[elemIdx];
 	}
 }
 
@@ -72,7 +72,7 @@ int main() {
 		printf("\n");
 	}
 
-	CUDA_CHECK(cudaFree(d_A)); 
+	CUDA_CHECK(cudaFree(d_A));
 	CUDA_CHECK(cudaFree(d_B));
 	CUDA_CHECK(cudaFree(d_C));
 	free(h_A); free(h_B); free(h_C);

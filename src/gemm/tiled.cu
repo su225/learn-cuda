@@ -24,14 +24,14 @@ __global__ void tiled_gemm_kernel(float *A,
 	// In order to compute the tile that the block is responsible
 	// for, we still need to start from the left and the top. Just
 	// that we are loading 1 whole tile at a time.
-	for (int t = 0; t < K; t += TILESZ) {
+	for (int tileIdx = 0; tileIdx < K/TILESZ; tileIdx++) {
 		// Since the block size of 32x32 corresponds to the shared memory
 		// size of 32x32 with 32 threads forming a warp, each row of A's tile
 		// and column of B's tile is assigned to a warp. Warp 0 (threads 0-31)
 		// loads row 0 of A's tile and col 0 of B's tile.
 		int tile_a_row = start_row + threadIdx.y;
-		int tile_a_col = t + threadIdx.x;
-		int tile_b_row = t + threadIdx.y;
+		int tile_a_col = tileIdx * TILESZ + threadIdx.x;
+		int tile_b_row = tileIdx * TILESZ + threadIdx.y;
 		int tile_b_col = start_col + threadIdx.x;
 
 		if (tile_a_row < M && tile_a_col < K) {
