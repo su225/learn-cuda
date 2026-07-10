@@ -12,7 +12,7 @@ const unsigned int LOG2_THREADS_PER_WARP = 5;
 // Define block, warp, thread level dimensions
 const unsigned int BM = 128;
 const unsigned int BN = 128;
-const unsigned int BK = 128;
+const unsigned int BK = 8;
 const unsigned int rowsPerWarp = 4;
 const unsigned int colsPerWarp = 128;
 const unsigned int rowsPerLane = 4;
