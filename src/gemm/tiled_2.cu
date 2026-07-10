@@ -10,13 +10,13 @@ const unsigned int THREADS_PER_WARP = 32;
 const unsigned int LOG2_THREADS_PER_WARP = 5;
 
 // Define block, warp, thread level dimensions
-const unsigned int BM = 128;
-const unsigned int BN = 128;
-const unsigned int BK = 8;
-const unsigned int rowsPerWarp = 4;
-const unsigned int colsPerWarp = 128;
-const unsigned int rowsPerLane = 4;
-const unsigned int colsPerLane = 4;
+const unsigned int BM = 64;
+const unsigned int BN = 64;
+const unsigned int BK = 64;
+const unsigned int rowsPerWarp = 2;
+const unsigned int colsPerWarp = 64;
+const unsigned int rowsPerLane = 2;
+const unsigned int colsPerLane = 2;
 
 const unsigned int warpRows = BM / rowsPerWarp;
 const unsigned int warpCols = BN / colsPerWarp;
@@ -24,22 +24,22 @@ const unsigned int laneRows = rowsPerWarp / rowsPerLane;
 const unsigned int laneCols = colsPerWarp / colsPerLane;
 
 // Define dimensions for loading the (warp, lane, value) for A
-const unsigned int LOAD_WARP_A_DIM_ROWS = 4;
-const unsigned int LOAD_WARP_A_DIM_COLS = 128;
+const unsigned int LOAD_WARP_A_DIM_ROWS = 2;
+const unsigned int LOAD_WARP_A_DIM_COLS = 64;
 const unsigned int LOAD_WARP_A_ROWS = BM / LOAD_WARP_A_DIM_ROWS;
 const unsigned int LOAD_WARP_A_COLS = BK / LOAD_WARP_A_DIM_COLS;
 const unsigned int LOAD_LANE_A_DIM_ROWS = 1;
-const unsigned int LOAD_LANE_A_DIM_COLS = 16;
+const unsigned int LOAD_LANE_A_DIM_COLS = 4;
 const unsigned int LOAD_LANE_A_ROWS = LOAD_WARP_A_DIM_ROWS / LOAD_LANE_A_DIM_ROWS;
 const unsigned int LOAD_LANE_A_COLS = LOAD_WARP_A_DIM_COLS / LOAD_LANE_A_DIM_COLS;
 
 // Define dimensions for loading the (warp, lane, value) for B
-const unsigned int LOAD_WARP_B_DIM_ROWS = 4;
-const unsigned int LOAD_WARP_B_DIM_COLS = 128;
+const unsigned int LOAD_WARP_B_DIM_ROWS = 2;
+const unsigned int LOAD_WARP_B_DIM_COLS = 64;
 const unsigned int LOAD_WARP_B_ROWS = BM / LOAD_WARP_B_DIM_ROWS;
 const unsigned int LOAD_WARP_B_COLS = BK / LOAD_WARP_B_DIM_COLS;
 const unsigned int LOAD_LANE_B_DIM_ROWS = 1;
-const unsigned int LOAD_LANE_B_DIM_COLS = 16;
+const unsigned int LOAD_LANE_B_DIM_COLS = 4;
 const unsigned int LOAD_LANE_B_ROWS = LOAD_WARP_B_DIM_ROWS / LOAD_LANE_B_DIM_ROWS;
 const unsigned int LOAD_LANE_B_COLS = LOAD_WARP_B_DIM_COLS / LOAD_LANE_B_DIM_COLS;
 
