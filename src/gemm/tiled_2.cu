@@ -36,12 +36,12 @@ const unsigned int LOAD_LANE_A_COLS = LOAD_WARP_A_DIM_COLS / LOAD_LANE_A_DIM_COL
 // Define dimensions for loading the (warp, lane, value) for B
 const unsigned int LOAD_WARP_B_DIM_ROWS = 4;
 const unsigned int LOAD_WARP_B_DIM_COLS = 128;
-const unsigned int LOAD_WARP_B_ROWS = BM / LOAD_WARP_A_DIM_ROWS;
-const unsigned int LOAD_WARP_B_COLS = BK / LOAD_WARP_A_DIM_COLS;
+const unsigned int LOAD_WARP_B_ROWS = BM / LOAD_WARP_B_DIM_ROWS;
+const unsigned int LOAD_WARP_B_COLS = BK / LOAD_WARP_B_DIM_COLS;
 const unsigned int LOAD_LANE_B_DIM_ROWS = 1;
 const unsigned int LOAD_LANE_B_DIM_COLS = 16;
-const unsigned int LOAD_LANE_B_ROWS = LOAD_WARP_A_DIM_ROWS / LOAD_LANE_A_DIM_ROWS;
-const unsigned int LOAD_LANE_B_COLS = LOAD_WARP_A_DIM_COLS / LOAD_LANE_A_DIM_COLS;
+const unsigned int LOAD_LANE_B_ROWS = LOAD_WARP_B_DIM_ROWS / LOAD_LANE_B_DIM_ROWS;
+const unsigned int LOAD_LANE_B_COLS = LOAD_WARP_B_DIM_COLS / LOAD_LANE_B_DIM_COLS;
 
 
 __global__ void tiled_gemm_kernel_v2(float const *A,
@@ -97,8 +97,8 @@ __global__ void tiled_gemm_kernel_v2(float const *A,
             for (int j = 0; j < LOAD_LANE_B_DIM_COLS; j++) {
                 int loadRow = (batchId*BK) + (blockRow * BK) + (loadWarpBRow + LOAD_WARP_B_DIM_ROWS) + (loadLaneBRow) + i;
                 int loadCol = (blockCol*BN) + (loadLaneBCol * LOAD_LANE_B_DIM_ROWS) + j;
-                int storeRow = (loadWarpBRow * LOAD_WARP_A_DIM_ROWS) + (loadLaneBRow) + i;
-                int storeCol = (loadLaneBCol * LOAD_WARP_A_DIM_COLS) + j;
+                int storeRow = (loadWarpBRow * LOAD_WARP_B_DIM_ROWS) + (loadLaneBRow) + i;
+                int storeCol = (loadLaneBCol * LOAD_WARP_B_DIM_COLS) + j;
                 if (loadRow < K && loadCol < N) {
                     float elem = B[loadRow*K + loadCol];
                     sB[storeRow * BK + storeCol] = elem;
