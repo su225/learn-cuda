@@ -89,6 +89,9 @@ int main(int argc, char** argv) {
         } else if (args.kernel == "tiled") {
             std::cout << "Running tiled GEMM" << std::endl;
             tiled_gemm(a, b, c, args.M, args.N, args.K);
+        } else if (args.kernel == "tiled_v2") {
+            std::cout << "Running tiledV2 GEMM" << std::endl;
+            tiled_gemm_v2(a, b, c, args.M, args.N, args.K);
         } else if (args.kernel == "cublas") {
             std::cout << "Running cuBLASLt GEMM" << std::endl;
             cuBLASLt_gemm(a, b, c, args.M, args.N, args.K);
