@@ -38,3 +38,7 @@ std::vector<float> random_matrix(int size, float scale, int seed);
 void print_matrix(std::vector<float> matrix,
                   int rows, int cols,
                   int maxPrintRows, int maxPrintCols);
+
+
+template <int BM, int BN, int BK, int TM, int TN>
+void validate_gemm_config();

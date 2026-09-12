@@ -136,7 +136,14 @@ void tiled_gemm_v2(
     int threadsPerBlock = 32 * 32;
     int totalGridBlocks = (totalElements + threadsPerBlock - 1) / threadsPerBlock;
 
-    tiled_gemm_kernel_v2<aL,bL,cL><<<totalGridBlocks, threadsPerBlock>>>(dA, dB, dC, M, N, K);
+    constexpr int BM = 128;
+    constexpr int BN = 128;
+    constexpr int BK = 16;
+    constexpr int TM = 8;
+    constexpr int TN = 8;
+
+    validate_gemm_config<BM,BN,BK,TN,TK>();
+    tiled_gemm_kernel_v2<BM,BN,BK,TM,TK><<<totalGridBlocks, threadsPerBlock>>>(dA, dB, dC, M, N, K);
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(C.data(), dC, C.size()*sizeof(float), cudaMemcpyDeviceToHost));
 }
