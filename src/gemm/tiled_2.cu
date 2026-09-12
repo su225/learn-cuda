@@ -1,131 +1,118 @@
+#include <cmath>
 #include <vector>
+#include <algorithm>
+
 #include <cuda_runtime.h>
 
 #include "common.h"
 
-template <unsigned int x> inline constexpr int log2_v = 1 + log2_v<(x >> 1)>;
-template <> inline constexpr int log2_v<0> = 1;
+template <int BM, int BN, int BK, int TM, int TN>
+__global__
+void tiled_gemm_kernel_v2(float const* __restrict__ A,
+                          float const* __restrict__ B,
+                          float *C,
+                          const int M,
+                          const int N,
+                          const int K) {
+    static_assert(BM > 0 && BN > 0 && BK > 0, "Tile dimensions must be positive");
+    static_assert(TM > 0 && TN > 0, "Thread tile dimensions must be positive");
+    static_assert(BM % TM == 0, "BM must be divisible by TM");
+    static_assert(BN % TN == 0, "BN must be divisible by TN");
 
-const unsigned int THREADS_PER_WARP = 32;
-const unsigned int LOG2_THREADS_PER_WARP = 5;
+    constexpr int THREADS_M = BM / TM;
+    constexpr int THREADS_N = BN / TN;
+    static_assert(THREADS_M % THREADS_N <= 1024, "Too many threads per block");
 
-// Define block, warp, thread level dimensions
-const unsigned int BM = 64;
-const unsigned int BN = 64;
-const unsigned int BK = 64;
-const unsigned int rowsPerWarp = 2;
-const unsigned int colsPerWarp = 64;
-const unsigned int rowsPerLane = 2;
-const unsigned int colsPerLane = 2;
+    __shared__ float As[BM][BK];
+    __shared__ float Bs[BK][BN];
 
-const unsigned int warpRows = BM / rowsPerWarp;
-const unsigned int warpCols = BN / colsPerWarp;
-const unsigned int laneRows = rowsPerWarp / rowsPerLane;
-const unsigned int laneCols = colsPerWarp / colsPerLane;
+    const int tx = threadIdx.x;
+    const int ty = threadIdx.y;
+    const int tid = ty * blockDim.x + tx;
 
-// Define dimensions for loading the (warp, lane, value) for A
-const unsigned int LOAD_WARP_A_DIM_ROWS = 2;
-const unsigned int LOAD_WARP_A_DIM_COLS = 64;
-const unsigned int LOAD_WARP_A_ROWS = BM / LOAD_WARP_A_DIM_ROWS;
-const unsigned int LOAD_WARP_A_COLS = BK / LOAD_WARP_A_DIM_COLS;
-const unsigned int LOAD_LANE_A_DIM_ROWS = 1;
-const unsigned int LOAD_LANE_A_DIM_COLS = 4;
-const unsigned int LOAD_LANE_A_ROWS = LOAD_WARP_A_DIM_ROWS / LOAD_LANE_A_DIM_ROWS;
-const unsigned int LOAD_LANE_A_COLS = LOAD_WARP_A_DIM_COLS / LOAD_LANE_A_DIM_COLS;
+    // The top-left (row,col) coordinates of the resulting submatrix
+    // the current block/CTA is responsible for computing
+    const int block_row = blockIdx.y * BM;
+    const int block_col = blockIdx.x * BN;
 
-// Define dimensions for loading the (warp, lane, value) for B
-const unsigned int LOAD_WARP_B_DIM_ROWS = 2;
-const unsigned int LOAD_WARP_B_DIM_COLS = 64;
-const unsigned int LOAD_WARP_B_ROWS = BM / LOAD_WARP_B_DIM_ROWS;
-const unsigned int LOAD_WARP_B_COLS = BK / LOAD_WARP_B_DIM_COLS;
-const unsigned int LOAD_LANE_B_DIM_ROWS = 1;
-const unsigned int LOAD_LANE_B_DIM_COLS = 4;
-const unsigned int LOAD_LANE_B_ROWS = LOAD_WARP_B_DIM_ROWS / LOAD_LANE_B_DIM_ROWS;
-const unsigned int LOAD_LANE_B_COLS = LOAD_WARP_B_DIM_COLS / LOAD_LANE_B_DIM_COLS;
+    // The block BM*BN is further subdivided into thread-blocks which
+    // is the area a single thread is responsible for. It is TM*TN.
+    // This is the coordinate of the top-left (row,col) coordinates
+    // of the area the current thread is responsible for.
+    // We map tid -> ((blockRow,blockCol),(threadRow,threadCol))
+    const int threadblock_row = block_row + ty * TM;
+    const int threadblock_col = block_col + tx * TN;
 
+    // Register accumulator
+    float acc[TM][TN];
 
-__global__ void tiled_gemm_kernel_v2(float const *A,
-                                     float const *B,
-                                     float *C,
-                                     const int M,
-                                     const int N,
-                                     const int K) {
-    __shared__ float sA[BM * BK];
-    __shared__ float sB[BK * BN];
-    float sC[BM * BN];
+    #pragma unroll
+    for (int m = 0; m < TM; m++) {
+        #pragma unroll
+        for (int n = 0; n < TN; n++) {
+            acc[m][n] = 0.0f;
+        }
+    }
 
-    const int blockIndex = blockIdx.x;
-    const int blockRow = blockIndex >> log2_v<BN>;
-    const int blockCol = blockIndex & (BN-1);
+    // Number of threads in the participating block.
+    const int num_block_threads = blockDim.x * blockDim.y;
 
-    const int warpIndex = threadIdx.x >> LOG2_THREADS_PER_WARP;
-    const int laneIndex = threadIdx.x & (THREADS_PER_WARP-1);
-    const int warpRow = warpIndex >> log2_v<colsPerWarp>;
-    const int warpCol = warpIndex & (colsPerWarp - 1);
-    const int laneRow = laneIndex >> log2_v<colsPerLane>;
-    const int laneCol = laneIndex & (colsPerLane - 1);
+    // Iterate over K in BK-sized chunks.
+    for (int k0 = 0; k0 < K; k0 += BK) {
 
-    const int startRow = warpRow*rowsPerWarp + laneRow*rowsPerLane;
-    const int startCol = warpCol*colsPerWarp + laneCol*colsPerLane;
-
-    int numBatches = K / BK;
-    for (int batchId = 0; batchId < numBatches; batchId++) {
-        const int loadWarpARow = warpIndex >> log2_v<LOAD_WARP_A_COLS>;
-        const int loadWarpACol = warpIndex & (LOAD_WARP_A_COLS - 1);
-        const int loadLaneARow = laneIndex >> log2_v<LOAD_LANE_A_COLS>;
-        const int loadLaneACol = laneIndex & (LOAD_LANE_A_COLS - 1);
-        for (int i = 0; i < LOAD_LANE_A_DIM_ROWS; i++) {
-            for (int j = 0; j < LOAD_LANE_A_DIM_COLS; j++) {
-                int loadRow = (blockRow * BM) + (loadWarpARow * LOAD_WARP_A_DIM_ROWS) + (loadLaneARow) + i;
-                int loadCol = (batchId*BK) + (blockCol * BK) + (loadLaneACol * LOAD_LANE_A_DIM_ROWS) + j;
-                int storeRow = (loadWarpARow * LOAD_WARP_A_DIM_ROWS) + (loadLaneARow) + i;
-                int storeCol = (loadLaneACol * LOAD_WARP_A_DIM_COLS) + j;
-                if (loadRow < M && loadCol < K) {
-                    float elem = A[loadRow*K + loadCol];
-                    sA[storeRow * BK + storeCol] = elem;
-                } else {
-                    sA[storeRow * BK + storeCol] = 0.0;
-                }
+        // Load tile A. All threads in the block load consecutive addresses. This
+        // coalesces memory accesses assuming row-major storage.
+        for (int linear = tid; linear < BM * BK; linear += num_block_threads) {
+            const int smem_row = linear / BK;
+            const int smem_col = linear % BK;
+            const int global_row = block_row + smem_row;
+            const int global_col = k0 + smem_col;
+            if (global_row < M && global_col < K) {
+                As[smem_row][smem_col] = A[global_row * K + global_col];
+            } else {
+                As[smem_row][smem_col] = 0.0f;
             }
         }
 
-        const int loadWarpBRow = warpIndex >> log2_v<LOAD_WARP_B_COLS>;
-        const int loadWarpBCol = warpIndex & (LOAD_WARP_B_COLS - 1);
-        const int loadLaneBRow = laneIndex >> log2_v<LOAD_LANE_B_COLS>;
-        const int loadLaneBCol = laneIndex & (LOAD_LANE_B_COLS - 1);
-        for (int i = 0; i < LOAD_LANE_B_DIM_ROWS; i++) {
-            for (int j = 0; j < LOAD_LANE_B_DIM_COLS; j++) {
-                int loadRow = (batchId*BK) + (blockRow * BK) + (loadWarpBRow + LOAD_WARP_B_DIM_ROWS) + (loadLaneBRow) + i;
-                int loadCol = (blockCol*BN) + (loadLaneBCol * LOAD_LANE_B_DIM_ROWS) + j;
-                int storeRow = (loadWarpBRow * LOAD_WARP_B_DIM_ROWS) + (loadLaneBRow) + i;
-                int storeCol = (loadLaneBCol * LOAD_WARP_B_DIM_COLS) + j;
-                if (loadRow < K && loadCol < N) {
-                    float elem = B[loadRow*K + loadCol];
-                    sB[storeRow * BK + storeCol] = elem;
-                } else {
-                    sB[storeRow * BK + storeCol] = 0.0;
-                }
+        for (int linear = tid; linear < BK * BN; linear += num_block_threads) {
+            const int smem_row = linear / BN;
+            const int smem_col = linear % BN;
+            const int global_row = k0 + smem_row;
+            const int global_col = block_col + smem_col;
+            if (global_row < K && global_col < N) {
+                Bs[smem_row][smem_col] = B[global_row * N + global_col];
+            } else {
+                Bs[smem_row][smem_col] = 0.0f;
             }
         }
         __syncthreads();
 
-        for (int i = 0; i < rowsPerLane; i++) {
-            for (int j = 0; j < colsPerLane; j++) {
-                const int row = startRow + i;
-                const int col = startCol + j;
-                const int loc = row*BN + col;
-                for (int k = 0; k < BK; k++) {
-                    sC[loc] += sA[row*BK + k] * sB[k*BN + col];
+        const int valid_k = std::min(BK, K - k0);
+        for (int k = 0; k < valid_k; ++k) {
+            #pragma unroll
+            for (int m = 0; m < TM; ++m) {
+                const float a = As[ty*TM + m][k];
+
+                #pragma unroll
+                for (int n = 0; n < TN; ++n) {
+                    const float b = Bs[k][tx*TN + n];
+                    acc[m][n] = std::fmaf(a, b, acc[m][n]);
                 }
             }
         }
         __syncthreads();
     }
-    int globalStartRow = blockRow*BM + warpRow*rowsPerWarp + laneRow*rowsPerLane;
-    int globalStartCol = blockCol*BN + warpCol*colsPerWarp + laneCol*colsPerLane;
-    for (int i = 0; i < rowsPerLane; i++) {
-        for (int j = 0; j < colsPerLane; j++) {
-            C[(globalStartRow+i)*N + (globalStartCol+j)] = sC[(startRow+i)*BN + (startCol+j)];
+
+    // Store the register tile
+    for (int m = 0; m < TM; m++) {
+        const int global_row = threadblock_row + m;
+        if (global_row < M) {
+            for (int n = 0; n < TN; n++) {
+                const int global_col = threadblock_col + n;
+                if (global_col < N) {
+                    C[global_row * M + global_col] = acc[m][n];
+                }
+            }
         }
     }
 }
@@ -148,7 +135,8 @@ void tiled_gemm_v2(
     int totalElements = M * N;
     int threadsPerBlock = 32 * 32;
     int totalGridBlocks = (totalElements + threadsPerBlock - 1) / threadsPerBlock;
-    tiled_gemm_kernel_v2<<<totalGridBlocks, threadsPerBlock>>>(dA, dB, dC, M, N, K);
+
+    tiled_gemm_kernel_v2<aL,bL,cL><<<totalGridBlocks, threadsPerBlock>>>(dA, dB, dC, M, N, K);
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(C.data(), dC, C.size()*sizeof(float), cudaMemcpyDeviceToHost));
 }
