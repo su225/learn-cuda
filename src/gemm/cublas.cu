@@ -28,10 +28,17 @@ void cuBLASLt_gemm(
 	cublasLtMatrixLayout_t Adesc, Bdesc, Cdesc;
 	cublasLtMatmulDesc_t opDesc;
 
+	cublasLtOrder_t order = CUBLASLT_ORDER_ROW;
+
     CUBLAS_CHECK(cublasLtCreate(&handle));
 	CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&Adesc, CUDA_R_32F, M, K, K));
+	CUBLAS_CHECK(cublasLtMatrixLayoutSetAttribute(Adesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order)));
+
 	CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&Bdesc, CUDA_R_32F, K, N, N));
+	CUBLAS_CHECK(cublasLtMatrixLayoutSetAttribute(Bdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order)));
+
 	CUBLAS_CHECK(cublasLtMatrixLayoutCreate(&Cdesc, CUDA_R_32F, M, N, N));
+	CUBLAS_CHECK(cublasLtMatrixLayoutSetAttribute(Cdesc, CUBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order)));
 
 	CUBLAS_CHECK(cublasLtMatmulDescCreate(
 		&opDesc,

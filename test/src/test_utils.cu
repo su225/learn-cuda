@@ -20,10 +20,12 @@ void compare(
             std::cout << "Mismatch at index " << i
                 << '(' << "row=" << mismatchRow << ","
                        << "col=" << mismatchCol << ')' << std::endl;
+            std::cout << "Expected value: " << expected[i] << std::endl;
+            std::cout << "Actual value:   " << actual[i] << std::endl;
             std::cout << "Expected: " << std::endl;
-            print_matrix(actual, rows, cols, 10, 10); std::cout << std::endl;
-            std::cout << "Actual: " << std::endl;
             print_matrix(expected, rows, cols, 10, 10); std::cout << std::endl;
+            std::cout << "Actual: " << std::endl;
+            print_matrix(actual, rows, cols, 10, 10); std::cout << std::endl;
             throw std::runtime_error("Mismatch at index " + std::to_string(i));
         }
     }

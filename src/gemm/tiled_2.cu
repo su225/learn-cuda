@@ -1,6 +1,5 @@
-#include <cmath>
+#include <cstdio>
 #include <vector>
-#include <algorithm>
 
 #include <cuda_runtime.h>
 
@@ -21,7 +20,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
 
     constexpr int THREADS_M = BM / TM;
     constexpr int THREADS_N = BN / TN;
-    static_assert(THREADS_M % THREADS_N <= 1024, "Too many threads per block");
+    static_assert(THREADS_M * THREADS_N <= 1024, "Too many threads per block");
 
     __shared__ float As[BM][BK];
     __shared__ float Bs[BK][BN];
@@ -61,7 +60,8 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
     for (int k0 = 0; k0 < K; k0 += BK) {
 
         // Load tile A. All threads in the block load consecutive addresses. This
-        // coalesces memory accesses assuming row-major storage.
+        // coalesces memory accesses assuming row-major storage. Each thread with
+        // tid=T would load (T, T+B, T+2B,...) where B is the number of threads.
         for (int linear = tid; linear < BM * BK; linear += num_block_threads) {
             const int smem_row = linear / BK;
             const int smem_col = linear % BK;
@@ -87,7 +87,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
         }
         __syncthreads();
 
-        const int valid_k = std::min(BK, K - k0);
+        const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
         for (int k = 0; k < valid_k; ++k) {
             #pragma unroll
             for (int m = 0; m < TM; ++m) {
@@ -96,7 +96,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
                 #pragma unroll
                 for (int n = 0; n < TN; ++n) {
                     const float b = Bs[k][tx*TN + n];
-                    acc[m][n] = std::fmaf(a, b, acc[m][n]);
+                    acc[m][n] += a * b;
                 }
             }
         }
@@ -110,7 +110,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
             for (int n = 0; n < TN; n++) {
                 const int global_col = threadblock_col + n;
                 if (global_col < N) {
-                    C[global_row * M + global_col] = acc[m][n];
+                    C[global_row * N + global_col] = acc[m][n];
                 }
             }
         }
@@ -132,18 +132,19 @@ void tiled_gemm_v2(
     CUDA_CHECK(cudaMemcpy(dA, A.data(), A.size()*sizeof(float), cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(dB, B.data(), B.size()*sizeof(float), cudaMemcpyHostToDevice));
 
-    int totalElements = M * N;
-    int threadsPerBlock = 32 * 32;
-    int totalGridBlocks = (totalElements + threadsPerBlock - 1) / threadsPerBlock;
-
     constexpr int BM = 128;
     constexpr int BN = 128;
     constexpr int BK = 16;
     constexpr int TM = 8;
     constexpr int TN = 8;
 
-    validate_gemm_config<BM,BN,BK,TN,TN>();
-    tiled_gemm_kernel_v2<BM,BN,BK,TM,TN><<<totalGridBlocks, threadsPerBlock>>>(dA, dB, dC, M, N, K);
+    dim3 block(BN/TN, BM/TM); // 16x16 threads (256 threads per block)
+    dim3 grid(
+        (N + BN - 1)/BN,
+        (M + BM - 1)/BM
+    );
+
+    tiled_gemm_kernel_v2<BM,BN,BK,TM,TN><<<grid, block>>>(dA, dB, dC, M, N, K);
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(C.data(), dC, C.size()*sizeof(float), cudaMemcpyDeviceToHost));
 }

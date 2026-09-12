@@ -20,8 +20,8 @@ TEST_P(GemmTest, TiledKernel)
     std::vector<float> C_actual(M * N, 0);
     std::vector<float> C_expected(M * N, 0);
 
-    tiled_gemm(A, B, C_actual, M, N, K);
     cuBLASLt_gemm(A, B, C_expected, M, N, K);
+    tiled_gemm(A, B, C_actual, M, N, K);
 
     compare(C_actual, C_expected, M, N, 1e-4f);
 }
@@ -39,8 +39,19 @@ TEST_P(GemmTest, TiledKernelV2)
     std::vector<float> C_actual(M * N, 0);
     std::vector<float> C_expected(M * N, 0);
 
-    tiled_gemm_v2(A, B, C_actual, M, N, K);
     cuBLASLt_gemm(A, B, C_expected, M, N, K);
+    tiled_gemm_v2(A, B, C_actual, M, N, K);
+    // for (int r = 0; r < M; ++r) {
+    //     for (int c = 0; c < N; ++c) {
+    //         float x = 0.0;
+    //         for (int k = 0; k < K; ++k)
+    //             x += A[r*K+k] * B[k*N+c];
+    //         if (std::fabs(C_actual[r*N+c]-x) > 1e-4f) {
+    //             printf("BAD r=%d c=%d actual=%f cpu=%f\n",
+    //                 r, c, C_actual[r*N+c], x);
+    //         }
+    //     }
+    // }
 
     compare(C_actual, C_expected, M, N, 1e-4f);
 }
