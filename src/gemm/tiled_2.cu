@@ -104,15 +104,15 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
     }
 
     // Store the register tile
-    for (int m = 0; m < TM; m++) {
+    const int max_valid_m = TM < (M-threadblock_row) ? TM : (M-threadblock_row);
+    const int max_valid_n = TN < (N-threadblock_col) ? TN : (N-threadblock_col);
+    # pragma unroll
+    for (int m = 0; m < max_valid_m; m++) {
         const int global_row = threadblock_row + m;
-        if (global_row < M) {
-            for (int n = 0; n < TN; n++) {
-                const int global_col = threadblock_col + n;
-                if (global_col < N) {
-                    C[global_row * N + global_col] = acc[m][n];
-                }
-            }
+        #pragma unroll
+        for (int n = 0; n < max_valid_n; n++) {
+            const int global_col = threadblock_col + n;
+            C[global_row * N + global_col] = acc[m][n];
         }
     }
 }
@@ -134,7 +134,7 @@ void tiled_gemm_v2(
 
     constexpr int BM = 128;
     constexpr int BN = 128;
-    constexpr int BK = 16;
+    constexpr int BK = 32;
     constexpr int TM = 8;
     constexpr int TN = 8;
 
