@@ -1,9 +1,11 @@
-#include <cstdio>
 #include <vector>
 
 #include <cuda_runtime.h>
+#include <cooperative_groups.h>
 
 #include "common.h"
+
+namespace cg = cooperative_groups;
 
 template <int BM, int BN, int BK, int TM, int TN>
 __global__
@@ -22,17 +24,24 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
     constexpr int THREADS_N = BN / TN;
     static_assert(THREADS_M * THREADS_N <= 1024, "Too many threads per block");
 
-    __shared__ float As[BM][BK];
-    __shared__ float Bs[BK][BN];
+    auto block = cg::this_thread_block();
 
-    const int tx = threadIdx.x;
-    const int ty = threadIdx.y;
-    const int tid = ty * blockDim.x + tx;
+    const auto thread_index = block.thread_index();
+    const auto block_index = block.group_index();
+
+    const int tx = static_cast<int>(thread_index.x);
+    const int ty = static_cast<int>(thread_index.y);
+    const int tid = static_cast<int>(block.thread_rank());
+
+    // Shared memory tiles. 128B alignment is useful for future vectorized/TMA
+    // (Tensor Memory Accelerator) implementations.
+    __shared__ alignas(128) float As[BM][BK];
+    __shared__ alignas(128) float Bs[BK][BN];
 
     // The top-left (row,col) coordinates of the resulting submatrix
     // the current block/CTA is responsible for computing
-    const int block_row = blockIdx.y * BM;
-    const int block_col = blockIdx.x * BN;
+    const int block_row = static_cast<int>(block_index.y) * BM;
+    const int block_col = static_cast<int>(block_index.x) * BN;
 
     // The block BM*BN is further subdivided into thread-blocks which
     // is the area a single thread is responsible for. It is TM*TN.
@@ -85,7 +94,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
                 Bs[smem_row][smem_col] = 0.0f;
             }
         }
-        __syncthreads();
+        block.sync();
 
         const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
         for (int k = 0; k < valid_k; ++k) {
@@ -100,7 +109,7 @@ void tiled_gemm_kernel_v2(float const* __restrict__ A,
                 }
             }
         }
-        __syncthreads();
+        block.sync();
     }
 
     // Store the register tile
