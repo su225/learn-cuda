@@ -9,6 +9,7 @@ add_library(gpu_kernels
   gemm/naive.cu
   gemm/tiled.cu
   gemm/tiled_2.cu
+  gemm/tiled_vectorized_2.cu
   gemm/cublas.cu
   common.cpp
 )

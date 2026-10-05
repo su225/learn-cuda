@@ -56,6 +56,25 @@ TEST_P(GemmTest, TiledKernelV2)
     compare(C_actual, C_expected, M, N, 1e-4f);
 }
 
+TEST_P(GemmTest, TiledKernelVectorizedV2)
+{
+    auto tc = GetParam();
+
+    int M = tc.M;
+    int N = tc.N;
+    int K = tc.K;
+
+    std::vector<float> A = random_matrix(M * K, 1.0, 42);
+    std::vector<float> B = random_matrix(K * N, 1.0, 42);
+    std::vector<float> C_actual(M * N, 0);
+    std::vector<float> C_expected(M * N, 0);
+
+    cuBLASLt_gemm(A, B, C_expected, M, N, K);
+    tiled_gemm_vectorized_v2(A, B, C_actual, M, N, K);
+
+    compare(C_actual, C_expected, M, N, 1e-4f);
+}
+
 INSTANTIATE_TEST_SUITE_P(
     Correctness,
     GemmTest,
