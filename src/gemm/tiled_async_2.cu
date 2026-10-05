@@ -10,12 +10,12 @@ namespace cg = cooperative_groups;
 
 template <int BM, int BN, int BK, int TM, int TN>
 __global__
-void tiled_gemm_vectorized_kernel_v2(float const* __restrict__ A,
-                                     float const* __restrict__ B,
-                                     float *C,
-                                     const int M,
-                                     const int N,
-                                     const int K) {
+void tiled_gemm_async_kernel_v2(float const* __restrict__ A,
+                                float const* __restrict__ B,
+                                float *C,
+                                const int M,
+                                const int N,
+                                const int K) {
     constexpr int VEC = 4;
     static_assert(BM > 0 && BN > 0 && BK > 0, "Tile dimensions must be positive");
     static_assert(TM > 0 && TN > 0, "Thread tile dimensions must be positive");
@@ -147,7 +147,7 @@ void tiled_gemm_vectorized_kernel_v2(float const* __restrict__ A,
     }
 }
 
-void tiled_gemm_vectorized_v2(
+void tiled_gemm_async_v2(
     const std::vector<float>& A,
     const std::vector<float>& B,
     std::vector<float>& C,
@@ -174,7 +174,7 @@ void tiled_gemm_vectorized_v2(
         (M + BM - 1)/BM
     );
 
-    tiled_gemm_vectorized_kernel_v2<BM,BN,BK,TM,TN><<<grid, block>>>(dA, dB, dC, M, N, K);
+    tiled_gemm_async_kernel_v2<BM,BN,BK,TM,TN><<<grid, block>>>(dA, dB, dC, M, N, K);
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(C.data(), dC, C.size()*sizeof(float), cudaMemcpyDeviceToHost));
 }
