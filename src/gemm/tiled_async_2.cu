@@ -17,6 +17,8 @@ void tiled_gemm_async_kernel_v2(float const* __restrict__ A,
                                 const int N,
                                 const int K) {
     constexpr int VEC = 4;
+    constexpr int STORE_VEC = 4;
+
     static_assert(BM > 0 && BN > 0 && BK > 0, "Tile dimensions must be positive");
     static_assert(TM > 0 && TN > 0, "Thread tile dimensions must be positive");
     static_assert(BM % TM == 0, "BM must be divisible by TM");
@@ -27,6 +29,7 @@ void tiled_gemm_async_kernel_v2(float const* __restrict__ A,
     static_assert(THREADS_M * THREADS_N <= 1024, "Too many threads per block");
     static_assert(BK % VEC == 0, "BK must be divisible by float4 width");
     static_assert(BN % VEC == 0, "BN must be divisible by float4 width");
+    static_assert(TN % STORE_VEC == 0, "TN must be divisible by float4 width");
 
     // When vectorized, instead of loading 1 column, we load VEC columns
     // with a single instruction from Global.
@@ -48,8 +51,8 @@ void tiled_gemm_async_kernel_v2(float const* __restrict__ A,
     __shared__ alignas(128) float Bs[BK][BN];
 
     // The top-left (row,col) coordinates of the resulting submatrix
-    // the current block/CTA is responsible for computing
     const int block_row = static_cast<int>(block_index.y) * BM;
+    // the current block/CTA is responsible for computing
     const int block_col = static_cast<int>(block_index.x) * BN;
 
     // The block BM*BN is further subdivided into thread-blocks which
@@ -136,13 +139,27 @@ void tiled_gemm_async_kernel_v2(float const* __restrict__ A,
     // Store the register tile
     const int max_valid_m = TM < (M-threadblock_row) ? TM : (M-threadblock_row);
     const int max_valid_n = TN < (N-threadblock_col) ? TN : (N-threadblock_col);
-    # pragma unroll
-    for (int m = 0; m < max_valid_m; m++) {
-        const int global_row = threadblock_row + m;
+
+    if (threadblock_col + TN <= N) {
         #pragma unroll
-        for (int n = 0; n < max_valid_n; n++) {
-            const int global_col = threadblock_col + n;
-            C[global_row * N + global_col] = acc[m][n];
+        for (int m = 0; m < max_valid_m; m++) {
+            const int global_row = threadblock_row + m;
+            #pragma unroll
+            for (int n = 0; n < TN; n += STORE_VEC) {
+                const float4 value = make_float4(acc[m][n], acc[m][n+1], acc[m][n+2], acc[m][n+3]);
+                auto* dst = reinterpret_cast<float4*>(C + global_row*N + threadblock_col + n);
+                *dst = value;
+            }
+        }
+    } else {
+        #pragma unroll
+        for (int m = 0; m < max_valid_m; m++) {
+            const int global_row = threadblock_row + m;
+            #pragma unroll
+            for (int n = 0; n < max_valid_n; n++) {
+                const int global_col = threadblock_col + n;
+                C[global_row * N + global_col] = acc[m][n];
+            }
         }
     }
 }
