@@ -45,6 +45,13 @@ void tiled_gemm_async_v2(
     int M, int N, int K
 );
 
+void tiled_gemm_async_swizzle_b(
+    const std::vector<float>& A,
+    const std::vector<float>& B,
+    std::vector<float>& C,
+    int M, int N, int K
+);
+
 void cuBLASLt_gemm(
     const std::vector<float>& A,
     const std::vector<float>& B,

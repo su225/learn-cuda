@@ -11,6 +11,7 @@ add_library(gpu_kernels
   gemm/tiled_2.cu
   gemm/tiled_vectorized_2.cu
   gemm/tiled_async_2.cu
+  gemm/tiled_async_swizzle_b.cu
   gemm/cublas.cu
   common.cpp
 )
