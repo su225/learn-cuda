@@ -131,16 +131,34 @@ void tiled_gemm_async_swizzle_b_kernel(float const* __restrict__ A,
 
         const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
         for (int k = 0; k < valid_k; ++k) {
+            float b_frag[TN];
+            constexpr int VECTORIZED_N = (TN / VEC) * VEC;
+
+            #pragma unroll
+            for (int n = 0; n < VECTORIZED_N; n += VEC) {
+                const int logical_col = tx * TN + n;
+                const int physical_col = swizzle<1, 2, 3>(logical_col);
+                const float4 b = *reinterpret_cast<const float4*>(&Bs[k][physical_col]);
+
+                b_frag[n + 0] = b.x;
+                b_frag[n + 1] = b.y;
+                b_frag[n + 2] = b.z;
+                b_frag[n + 3] = b.w;
+            }
+
+            #pragma unroll
+            for (int n = VECTORIZED_N; n < TN; ++n) {
+                const int logical_col = tx * TN + n;
+                const int physical_col = swizzle<1, 2, 3>(logical_col);
+                b_frag[n] = Bs[k][physical_col];
+            }
+
             #pragma unroll
             for (int m = 0; m < TM; ++m) {
-                const float a = As[ty*TM + m][k];
-
+                const float a = As[ty * TM + m][k];
                 #pragma unroll
                 for (int n = 0; n < TN; ++n) {
-                    const int logical_b_col = tx*TN + n;
-                    const int physical_b_col = swizzle<1,2,3>(logical_b_col);
-                    const float b = Bs[k][physical_b_col];
-                    acc[m][n] += a * b;
+                    acc[m][n] += a * b_frag[n];
                 }
             }
         }
