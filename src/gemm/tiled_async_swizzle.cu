@@ -55,8 +55,8 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
 
     // Shared memory tiles. 128B alignment is useful for future vectorized/TMA
     // (Tensor Memory Accelerator) implementations.
-    __shared__ alignas(128) float As[BM][BK];
-    __shared__ alignas(128) float Bs[BK][BN];
+    __shared__ alignas(128) float As[BM*BK];
+    __shared__ alignas(128) float Bs[BK*BN];
 
     // The top-left (row,col) coordinates of the resulting submatrix
     const int block_row = static_cast<int>(block_index.y) * BM;
@@ -97,13 +97,10 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
             const int smem_row = vec_index / A_VEC_COLS;
             const int smem_vec_col = vec_index % A_VEC_COLS;
             const int smem_col = smem_vec_col * VEC;
-            // Unlike loading Bs with swizzling (below), the source comes from the row index.
-            // For swizzling, the row part has to be supplied as well. But after swizzling, we
-            // extract the column part only
-            const int smem_physical_col = swizzle<1,2,6>(smem_row*BK + smem_col) % BK;
+            const int smem_physical = swizzle<1,2,6>(smem_row*BK + smem_col);
             const int global_row = block_row + smem_row;
             const int global_col = k0 + smem_col;
-            auto* dst = reinterpret_cast<float4*>(&As[smem_row][smem_physical_col]);
+            auto* dst = reinterpret_cast<float4*>(&As[smem_physical]);
             if (global_row < M && global_col < K) {
                 const auto *src = reinterpret_cast<const float4*>(A + global_row*K + global_col);
                 cuda::memcpy_async(dst, src, cuda::aligned_size_t<16>(sizeof(float4)), pipeline);
@@ -116,10 +113,10 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
             const int smem_row = vec_index / B_VEC_COLS;
             const int smem_vec_col = vec_index % B_VEC_COLS;
             const int smem_col = smem_vec_col * VEC;
-            const int smem_physical_col = swizzle<1,2,3>(smem_col);
+            const int smem_physical = swizzle<1,2,3>(smem_row*BN + smem_col);
             const int global_row = k0 + smem_row;
             const int global_col = block_col + smem_col;
-            auto* dst = reinterpret_cast<float4*>(&Bs[smem_row][smem_physical_col]);
+            auto* dst = reinterpret_cast<float4*>(&Bs[smem_physical]);
             if (global_row < K && global_col < N) {
                 const auto *src = reinterpret_cast<const float4*>(B + global_row*N + global_col);
                 cuda::memcpy_async(dst, src, cuda::aligned_size_t<16>(sizeof(float4)), pipeline);
@@ -134,6 +131,7 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
         block.sync();
 
         const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
+        const int a_swizzle = (ty & 1) << 2;
         for (int k = 0; k < valid_k; ++k) {
             float b_frag[TN];
             constexpr int VECTORIZED_N = (TN / VEC) * VEC;
@@ -141,8 +139,8 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
             #pragma unroll
             for (int n = 0; n < VECTORIZED_N; n += VEC) {
                 const int logical_col = tx * TN + n;
-                const int physical_col = swizzle<1, 2, 3>(logical_col);
-                const float4 b = *reinterpret_cast<const float4*>(&Bs[k][physical_col]);
+                const int physical = swizzle<1, 2, 3>(k*BN + logical_col);
+                const float4 b = *reinterpret_cast<const float4*>(&Bs[physical]);
 
                 b_frag[n + 0] = b.x;
                 b_frag[n + 1] = b.y;
@@ -153,19 +151,15 @@ void tiled_gemm_async_swizzle_kernel(float const* __restrict__ A,
             #pragma unroll
             for (int n = VECTORIZED_N; n < TN; ++n) {
                 const int logical_col = tx * TN + n;
-                const int physical_col = swizzle<1, 2, 3>(logical_col);
-                b_frag[n] = Bs[k][physical_col];
+                const int physical = swizzle<1, 2, 3>(k*BN + logical_col);
+                b_frag[n] = Bs[physical];
             }
+
+            const int k_swizzled = k ^ a_swizzle;
 
             #pragma unroll
             for (int m = 0; m < TM; ++m) {
-                const int a_row = ty * TM + m;
-                const int a_col = k;
-                const int a_linear = a_row * BK + a_col;
-                const int a_physical = swizzle<1,2,6>(a_linear);
-                const int a_physical_row = a_physical / BK;
-                const int a_physical_col = a_physical % BK;
-                const float a = As[a_physical_row][a_physical_col];
+                const float a = As[(ty*TM + m)*BK + k_swizzled];
                 #pragma unroll
                 for (int n = 0; n < TN; ++n) {
                     acc[m][n] += a * b_frag[n];
