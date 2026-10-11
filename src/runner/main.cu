@@ -103,6 +103,9 @@ int main(int argc, char** argv) {
         } else if (args.kernel == "tiled_swizzle") {
             std::cout << "Running tiled async with all swizzle" << std::endl;
             tiled_gemm_async_swizzle(a, b, c, args.M, args.N, args.K);
+        } else if (args.kernel == "tiled_vec_v3") {
+            std::cout << "Running tiledV3 with Vectorized load and transpose" << std::endl;
+            tiled_gemm_vectorized_v3(a, b, c, args.M, args.N, args.K);
         } else if (args.kernel == "cublas") {
             std::cout << "Running cuBLASLt GEMM" << std::endl;
             cuBLASLt_gemm(a, b, c, args.M, args.N, args.K);

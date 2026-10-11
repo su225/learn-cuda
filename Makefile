@@ -2,7 +2,8 @@ BUILD_DIR := build
 CUDA_COMPILER := nvcc
 CUDA_COMPUTE_SANITIZER := compute-sanitizer
 
-KERNELS := tiled tiled_v2 tiled_vec_v2 tiled_async_v2 tiled_swizzle_b tiled_swizzle naive cublas
+KERNELS := tiled tiled_v2 tiled_vec_v2 tiled_async_v2 tiled_swizzle_b \
+		   tiled_swizzle tiled_vec_v3 naive cublas
 RACECHECK_TARGETS := $(addprefix racecheck-, $(KERNELS))
 MEMCHECK_TARGETS := $(addprefix memcheck-, $(KERNELS))
 
