@@ -21,6 +21,15 @@ message(STATUS "Found CUDA version: ${CUDAToolkit_VERSION}")
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
 )
+
+# CuTe
+add_library(cute_headers INTERFACE)
+
+target_include_directories(cute_headers
+    SYSTEM INTERFACE
+    ${CMAKE_SOURCE_DIR}/external/cutlass/include
+)
+
 add_subdirectory(src)
 
 include(cmake/FetchGoogleTest.cmake)

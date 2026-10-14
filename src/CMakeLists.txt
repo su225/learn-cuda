@@ -24,7 +24,9 @@ target_include_directories(gpu_kernels
 )
 
 target_link_libraries(gpu_kernels
-  PUBLIC CUDA::cudart
+  PUBLIC
+    CUDA::cudart
+    cute_headers
 )
 
 # GPU runner for benchmarking and running individual

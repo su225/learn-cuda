@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include <cuda/pipeline>
 #include <cooperative_groups.h>
+#include <cute/layout.hpp>
+#include <cute/tensor.hpp>
 
 #include "common.h"
 
