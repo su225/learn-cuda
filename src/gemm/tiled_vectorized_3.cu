@@ -11,7 +11,7 @@ namespace cg = cooperative_groups;
 template <int B, int M, int S>
 __device__ __forceinline__
 int swizzle(int x) {
-    int source_mask = (1<<B)-1;
+    constexpr int source_mask = (1<<B)-1;
     static_assert(S > 0, "only positive distance is supported");
     return x ^ (((x >> (M+S)) & source_mask) << M);
 }
