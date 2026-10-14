@@ -129,48 +129,91 @@ void tiled_gemm_vectorized_kernel_v3(float const* __restrict__ A,
 
         block.sync();
 
+        const int thread_a_base_part = ty * TM;
+        const int thread_b_base_part = tx * TN;
         const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
         for (int k = 0; k < valid_k; ++k) {
             float b_frag[TN], a_frag[TM];
             constexpr int VECTORIZED_M = (TM / VEC) * VEC;
             constexpr int VECTORIZED_N = (TN / VEC) * VEC;
 
-            #pragma unroll
-            for (int m = 0; m < VECTORIZED_M; m += VEC) {
-                const int logical_col = ty*TM + m;
-                const int physical = swizzle<3,2,7>(k*BM + logical_col);
-                const float4 a = *reinterpret_cast<const float4*>(&As[physical]);
+            if constexpr (TM == 8 && VEC == 4) {
+                const int base = k*BM + thread_a_base_part;
+                const int mask = k & 0x1c;
+                const int a0_offset = base ^ mask;
+                const int a1_offset = a0_offset ^ 0x4;
+                const float4 a0 = *reinterpret_cast<const float4*>(&As[a0_offset]);
+                const float4 a1 = *reinterpret_cast<const float4*>(&As[a1_offset]);
+                a_frag[0] = a0.x;
+                a_frag[1] = a0.y;
+                a_frag[2] = a0.z;
+                a_frag[3] = a0.w;
 
-                a_frag[m + 0] = a.x;
-                a_frag[m + 1] = a.y;
-                a_frag[m + 2] = a.z;
-                a_frag[m + 3] = a.w;
+                a_frag[4] = a1.x;
+                a_frag[5] = a1.y;
+                a_frag[6] = a1.z;
+                a_frag[7] = a1.w;
+            } else {
+                static_assert(TM % VEC == 0);
+
+                #pragma unroll
+                for (int m = 0; m < VECTORIZED_M; m += VEC) {
+                    const int logical_col = ty*TM + m;
+                    const int physical = swizzle<3,2,7>(k*BM + logical_col);
+                    const float4 a = *reinterpret_cast<const float4*>(&As[physical]);
+
+                    a_frag[m + 0] = a.x;
+                    a_frag[m + 1] = a.y;
+                    a_frag[m + 2] = a.z;
+                    a_frag[m + 3] = a.w;
+                }
+
+                #pragma unroll
+                for (int m = VECTORIZED_M; m < TM; ++m) {
+                    const int logical_col = ty*TM + m;
+                    const int physical = swizzle<3,2,7>(k*BM + logical_col);
+                    a_frag[m] = As[physical];
+                }
             }
 
-            #pragma unroll
-            for (int m = VECTORIZED_M; m < TM; ++m) {
-                const int logical_col = ty*TM + m;
-                const int physical = swizzle<3,2,7>(k*BM + logical_col);
-                a_frag[m] = As[physical];
-            }
+            if constexpr (TN == 8 && VEC == 4) {
+                const int b_base = k*BN + thread_b_base_part;
+                const int swizzle_mask = tx & 0x4;
+                const int b0_offset = b_base ^ swizzle_mask;
+                const int b1_offset = b0_offset ^ 0x4;
+                const float4 b0 = *reinterpret_cast<const float4*>(&Bs[b0_offset]);
+                const float4 b1 = *reinterpret_cast<const float4*>(&Bs[b1_offset]);
 
-            #pragma unroll
-            for (int n = 0; n < VECTORIZED_N; n += VEC) {
-                const int logical_col = tx * TN + n;
-                const int physical = swizzle<1,2,3>(k*BN + logical_col);
-                const float4 b = *reinterpret_cast<const float4*>(&Bs[physical]);
+                b_frag[0] = b0.x;
+                b_frag[1] = b0.y;
+                b_frag[2] = b0.z;
+                b_frag[3] = b0.w;
 
-                b_frag[n + 0] = b.x;
-                b_frag[n + 1] = b.y;
-                b_frag[n + 2] = b.z;
-                b_frag[n + 3] = b.w;
-            }
+                b_frag[4] = b1.x;
+                b_frag[5] = b1.y;
+                b_frag[6] = b1.z;
+                b_frag[7] = b1.w;
+            } else {
+                static_assert(TM % VEC == 0);
 
-            #pragma unroll
-            for (int n = VECTORIZED_N; n < TN; ++n) {
-                const int logical_col = tx * TN + n;
-                const int physical = swizzle<1,2,3>(k*BN + logical_col);
-                b_frag[n] = Bs[physical];
+                #pragma unroll
+                for (int n = 0; n < VECTORIZED_N; n += VEC) {
+                    const int logical_col = tx * TN + n;
+                    const int physical = swizzle<1,2,3>(k*BN + logical_col);
+                    const float4 b = *reinterpret_cast<const float4*>(&Bs[physical]);
+
+                    b_frag[n + 0] = b.x;
+                    b_frag[n + 1] = b.y;
+                    b_frag[n + 2] = b.z;
+                    b_frag[n + 3] = b.w;
+                }
+
+                #pragma unroll
+                for (int n = VECTORIZED_N; n < TN; ++n) {
+                    const int logical_col = tx * TN + n;
+                    const int physical = swizzle<1,2,3>(k*BN + logical_col);
+                    b_frag[n] = Bs[physical];
+                }
             }
 
             #pragma unroll
