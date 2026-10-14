@@ -69,6 +69,63 @@ struct BFragmentLoader<8, BN, 4> {
     }
 };
 
+template <int TM, int BM, int VEC = 4>
+struct AFragmentLoader {
+    __device__ __forceinline__
+    static void load(
+        const float* As,
+        const int k,
+        const int ty,
+        float (&a_frag)[TM])
+    {
+        static_assert(TM % VEC == 0);
+
+        #pragma unroll
+        for (int m = 0; m < TM; m += VEC) {
+            const int logical = k * BM + ty * TM + m;
+            const int physical = swizzle<3, 2, 7>(logical);
+            const float4 a = *reinterpret_cast<const float4*>(As + physical);
+
+            a_frag[m + 0] = a.x;
+            a_frag[m + 1] = a.y;
+            a_frag[m + 2] = a.z;
+            a_frag[m + 3] = a.w;
+        }
+    }
+};
+
+template <int BM>
+struct AFragmentLoader<8, BM, 4> {
+    __device__ __forceinline__
+    static void load(
+        const float* As,
+        int k,
+        int ty,
+        float (&a_frag)[8])
+    {
+        static_assert(BM % 8 == 0);
+        const int base = k * BM + ty * 8;
+        const int p0 = swizzle<3, 2, 7>(base);
+
+        // base is 8-element aligned, so +4 only toggles bit 2.
+        // The swizzle source bits [9:11] remain unchanged.
+        const int p1 = p0 ^ 0x4;
+
+        const float4 a0 = *reinterpret_cast<const float4*>(As + p0);
+        const float4 a1 = *reinterpret_cast<const float4*>(As + p1);
+
+        a_frag[0] = a0.x;
+        a_frag[1] = a0.y;
+        a_frag[2] = a0.z;
+        a_frag[3] = a0.w;
+
+        a_frag[4] = a1.x;
+        a_frag[5] = a1.y;
+        a_frag[6] = a1.z;
+        a_frag[7] = a1.w;
+    }
+};
+
 template <int BM, int BN, int BK, int TM, int TN>
 __global__
 void tiled_gemm_vectorized_kernel_v3(float const* __restrict__ A,
@@ -182,53 +239,10 @@ void tiled_gemm_vectorized_kernel_v3(float const* __restrict__ A,
 
         block.sync();
 
-        const int thread_a_base_part = ty * TM;
-        const int thread_b_base_part = tx * TN;
         const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
         for (int k = 0; k < valid_k; ++k) {
             float b_frag[TN], a_frag[TM];
-            constexpr int VECTORIZED_M = (TM / VEC) * VEC;
-            constexpr int VECTORIZED_N = (TN / VEC) * VEC;
-
-            if constexpr (TM == 8 && VEC == 4) {
-                const int base = k*BM + thread_a_base_part;
-                const int mask = k & 0x1c;
-                const int a0_offset = base ^ mask;
-                const int a1_offset = a0_offset ^ 0x4;
-                const float4 a0 = *reinterpret_cast<const float4*>(&As[a0_offset]);
-                const float4 a1 = *reinterpret_cast<const float4*>(&As[a1_offset]);
-                a_frag[0] = a0.x;
-                a_frag[1] = a0.y;
-                a_frag[2] = a0.z;
-                a_frag[3] = a0.w;
-
-                a_frag[4] = a1.x;
-                a_frag[5] = a1.y;
-                a_frag[6] = a1.z;
-                a_frag[7] = a1.w;
-            } else {
-                static_assert(TM % VEC == 0);
-
-                #pragma unroll
-                for (int m = 0; m < VECTORIZED_M; m += VEC) {
-                    const int logical_col = ty*TM + m;
-                    const int physical = swizzle<3,2,7>(k*BM + logical_col);
-                    const float4 a = *reinterpret_cast<const float4*>(&As[physical]);
-
-                    a_frag[m + 0] = a.x;
-                    a_frag[m + 1] = a.y;
-                    a_frag[m + 2] = a.z;
-                    a_frag[m + 3] = a.w;
-                }
-
-                #pragma unroll
-                for (int m = VECTORIZED_M; m < TM; ++m) {
-                    const int logical_col = ty*TM + m;
-                    const int physical = swizzle<3,2,7>(k*BM + logical_col);
-                    a_frag[m] = As[physical];
-                }
-            }
-
+            AFragmentLoader<TM,BM>::load(As, k, ty, a_frag);
             BFragmentLoader<TN,BN>::load(Bs, k, tx, b_frag);
 
             #pragma unroll
