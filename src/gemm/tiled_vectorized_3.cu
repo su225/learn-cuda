@@ -3,8 +3,10 @@
 #include <cuda_runtime.h>
 #include <cuda/pipeline>
 #include <cooperative_groups.h>
+
 #include <cute/layout.hpp>
 #include <cute/tensor.hpp>
+#include <cute/swizzle.hpp>
 
 #include "common.h"
 
@@ -18,46 +20,60 @@ int swizzle(int x) {
     return x ^ (((x >> (M+S)) & source_mask) << M);
 }
 
-template <int TN, int BN, int VEC = 4>
+template <int BM, int BN, int BK>
+struct SmemLayoutPolicy {
+    static_assert(BM == 128 && BN == 128, "Supports only 128x128 block");
+
+    using ALayout = decltype(
+        cute::composition(
+            cute::Swizzle<3,2,7>{},
+            cute::Layout<
+                cute::Shape<cute::Int<BM>, cute::Int<BK>>,
+                cute::Stride<cute::Int<1>, cute::Int<BM>>
+            >{}
+        )
+    );
+
+    using BLayout = decltype(
+        cute::composition(
+            cute::Swizzle<1,2,3>{},
+            cute::Layout<
+                cute::Shape<cute::Int<BK>, cute::Int<BN>>,
+                cute::Stride<cute::Int<BN>, cute::Int<1>>
+            >{}
+        )
+    );
+};
+
+template <int TN>
 struct BFragmentLoader {
+    template <class BTensor>
     __device__ __forceinline__
     static void load(
-        const float* Bs,
+        const BTensor& sB,
         const int k,
-        const int tx,
+        const int col,
         float (&b_frag)[TN]) {
-        static_assert(TN % VEC == 0);
 
         #pragma unroll
-        for (int n = 0; n < TN; n += VEC) {
-            const int logical = k*BN + tx*TN + n;
-            const int physical = swizzle<1, 2, 3>(logical);
-            const float4 b = *reinterpret_cast<const float4*>(Bs + physical);
-
-            b_frag[n + 0] = b.x;
-            b_frag[n + 1] = b.y;
-            b_frag[n + 2] = b.z;
-            b_frag[n + 3] = b.w;
+        for (int n = 0; n < TN; ++n) {
+            b_frag[n] = sB(k, col+n);
         }
     }
 };
 
-template <int BN>
-struct BFragmentLoader<8, BN, 4> {
+template <>
+struct BFragmentLoader<8> {
+    template <class BTensor>
     __device__ __forceinline__
     static void load(
-        const float* Bs,
+        const BTensor& sB,
         const int k,
-        const int tx,
+        const int col,
         float (&b_frag)[8])
     {
-        const int base = k*BN + tx * 8;
-        const int mask = tx & 0x4;
-        const int p0 = base ^ mask;
-        const int p1 = p0 ^ 0x4;
-
-        const float4 b0 = *reinterpret_cast<const float4*>(Bs + p0);
-        const float4 b1 = *reinterpret_cast<const float4*>(Bs + p1);
+        const float4 b0 = *reinterpret_cast<const float4*>(&sB(k, col+0));
+        const float4 b1 = *reinterpret_cast<const float4*>(&sB(k, col+4));
 
         b_frag[0] = b0.x;
         b_frag[1] = b0.y;
@@ -71,62 +87,109 @@ struct BFragmentLoader<8, BN, 4> {
     }
 };
 
-template <int TM, int BM, int VEC = 4>
+template <int TM>
 struct AFragmentLoader {
+    template <class ATensor>
     __device__ __forceinline__
     static void load(
-        const float* As,
+        const ATensor& sA,
         const int k,
-        const int ty,
-        float (&a_frag)[TM])
+        const int row,
+        float (&frag)[TM])
     {
-        static_assert(TM % VEC == 0);
-
         #pragma unroll
-        for (int m = 0; m < TM; m += VEC) {
-            const int logical = k * BM + ty * TM + m;
-            const int physical = swizzle<3, 2, 7>(logical);
-            const float4 a = *reinterpret_cast<const float4*>(As + physical);
-
-            a_frag[m + 0] = a.x;
-            a_frag[m + 1] = a.y;
-            a_frag[m + 2] = a.z;
-            a_frag[m + 3] = a.w;
+        for (int m = 0; m < TM; m++) {
+            frag[m] = sA(row+m, k);
         }
     }
 };
 
-template <int BM>
-struct AFragmentLoader<8, BM, 4> {
+template <>
+struct AFragmentLoader<8> {
+    template <class ATensor>
     __device__ __forceinline__
     static void load(
-        const float* As,
+        const ATensor& sA,
         int k,
-        int ty,
-        float (&a_frag)[8])
+        int row,
+        float (&frag)[8])
     {
-        static_assert(BM % 8 == 0);
-        const int base = k * BM + ty * 8;
-        const int p0 = swizzle<3, 2, 7>(base);
+        const float4 a0 = *reinterpret_cast<const float4*>(&sA(row+0, k));
+        const float4 a1 = *reinterpret_cast<const float4*>(&sA(row+4, k));
 
-        // base is 8-element aligned, so +4 only toggles bit 2.
-        // The swizzle source bits [9:11] remain unchanged.
-        const int p1 = p0 ^ 0x4;
+        frag[0] = a0.x;
+        frag[1] = a0.y;
+        frag[2] = a0.z;
+        frag[3] = a0.w;
 
-        const float4 a0 = *reinterpret_cast<const float4*>(As + p0);
-        const float4 a1 = *reinterpret_cast<const float4*>(As + p1);
-
-        a_frag[0] = a0.x;
-        a_frag[1] = a0.y;
-        a_frag[2] = a0.z;
-        a_frag[3] = a0.w;
-
-        a_frag[4] = a1.x;
-        a_frag[5] = a1.y;
-        a_frag[6] = a1.z;
-        a_frag[7] = a1.w;
+        frag[4] = a1.x;
+        frag[5] = a1.y;
+        frag[6] = a1.z;
+        frag[7] = a1.w;
     }
 };
+
+template <int TM, int TN>
+struct Multiplier {
+    __device__ __forceinline__
+    static void multiply(
+        const float (&a)[TM],
+        const float (&b)[TN],
+        float (&acc)[TM][TN]
+    ) {
+        #pragma unroll
+        for (int m = 0; m < TM; ++m) {
+            const float av = a[m];
+            #pragma unroll
+            for (int n = 0; n < TN; ++n) {
+                acc[m][n] += av * b[n];
+            }
+        }
+    }
+};
+
+template <int BM, int BK, class GlobalATensor, class SharedATensor, int VEC = 4>
+__device__ __forceinline__ void stage_a(
+    GlobalATensor const& gA,
+    SharedATensor sA,
+    int tid, int num_threads
+) {
+    static_assert(BK % VEC == 0);
+    constexpr int VECTORS_PER_ROW = BK / VEC;
+    constexpr int NUM_VECTORS     = BM * VECTORS_PER_ROW;
+
+    for (int i = tid; i < NUM_VECTORS; i += num_threads) {
+        const int m  = i / VECTORS_PER_ROW;
+        const int k4 = (i % VECTORS_PER_ROW) * VEC;
+        const float4 value = *reinterpret_cast<const float4*>(&gA(m, k4));
+        sA(m, k4 + 0) = value.x;
+        sA(m, k4 + 1) = value.y;
+        sA(m, k4 + 2) = value.z;
+        sA(m, k4 + 3) = value.w;
+    }
+}
+
+template <int BN, int BK, class GlobalBTensor, class SharedBTensor, class Pipeline, int VEC = 4>
+__device__ __forceinline__ void stage_b_async(
+    GlobalBTensor const& gB,
+    SharedBTensor sB,
+    int tid, int num_threads,
+    Pipeline& pipeline
+) {
+    static_assert(BN % VEC == 0);
+    constexpr int VECTORS_PER_ROW = BN / VEC;
+    constexpr int NUM_VECTORS     = BK * VECTORS_PER_ROW;
+    for (int i = tid; i < NUM_VECTORS; i += num_threads) {
+        const int k  = i / VECTORS_PER_ROW;
+        const int n4 = (i % VECTORS_PER_ROW) * VEC;
+        cuda::memcpy_async(
+            &sB(k, n4),
+            &gB(k, n4),
+            cuda::aligned_size_t<16>(sizeof(float4)),
+            pipeline
+        );
+    }
+}
 
 template <int BM, int BN, int BK, int TM, int TN>
 __global__
@@ -151,41 +214,57 @@ void tiled_gemm_vectorized_kernel_v3(float const* __restrict__ A,
     static_assert(BN % VEC == 0, "BN must be divisible by float4 width");
     static_assert(TN % STORE_VEC == 0, "TN must be divisible by float4 width");
 
-    // When vectorized, instead of loading 1 column, we load VEC columns
-    // with a single instruction from Global.
-    constexpr int A_VEC_COLS = BK / VEC;
-    constexpr int B_VEC_COLS = BN / VEC;
+    // Global tensors
+    auto mA = cute::make_tensor(
+        cute::make_gmem_ptr(A),
+        cute::make_layout(
+            cute::make_shape(M, K),
+            cute::make_stride(K, cute::Int<1>{})
+        )
+    );
+
+    auto mB = cute::make_tensor(
+        cute::make_gmem_ptr(B),
+        cute::make_layout(
+            cute::make_shape(K, N),
+            cute::make_stride(N, cute::Int<1>{})
+        )
+    );
+
+    auto mC = cute::make_tensor(
+        cute::make_gmem_ptr(C),
+        cute::make_layout(
+            cute::make_shape(M, N),
+            cute::make_stride(N, cute::Int<1>{})
+        )
+    );
+
+    using LayoutPolicy = SmemLayoutPolicy<BM,BN,BK>;
+    using ASmemLayout = typename LayoutPolicy::ALayout;
+    using BSmemLayout = typename LayoutPolicy::BLayout;
+
+    __shared__ alignas(128) float sA_storage[cute::cosize_v<ASmemLayout>];
+    __shared__ alignas(128) float sB_storage[cute::cosize_v<BSmemLayout>];
+
+    auto sA = cute::make_tensor(cute::make_smem_ptr(sA_storage), ASmemLayout{});
+    auto sB = cute::make_tensor(cute::make_smem_ptr(sB_storage), BSmemLayout{});
 
     auto block = cg::this_thread_block();
-
     const auto thread_index = block.thread_index();
     const auto block_index = block.group_index();
+    auto gC = cute::local_tile(
+        mC,
+        cute::Shape<cute::Int<BM>, cute::Int<BN>>{},
+        cute::make_coord(static_cast<int>(block_index.y),
+                         static_cast<int>(block_index.x))
+    );
 
     const int tx = static_cast<int>(thread_index.x);
     const int ty = static_cast<int>(thread_index.y);
     const int tid = static_cast<int>(block.thread_rank());
 
-    // Shared memory tiles. 128B alignment is useful for future vectorized/TMA
-    // (Tensor Memory Accelerator) implementations.
-    __shared__ alignas(128) float As[BK*BM]; // column-oriented
-    __shared__ alignas(128) float Bs[BK*BN]; // row-oriented+swizzle<1,2,3>
-
-    // The top-left (row,col) coordinates of the resulting submatrix
-    const int block_row = static_cast<int>(block_index.y) * BM;
-    // the current block/CTA is responsible for computing
-    const int block_col = static_cast<int>(block_index.x) * BN;
-
-    // The block BM*BN is further subdivided into thread-blocks which
-    // is the area a single thread is responsible for. It is TM*TN.
-    // This is the coordinate of the top-left (row,col) coordinates
-    // of the area the current thread is responsible for.
-    // We map tid -> ((blockRow,blockCol),(threadRow,threadCol))
-    const int threadblock_row = block_row + ty * TM;
-    const int threadblock_col = block_col + tx * TN;
-
     // Register accumulator
     float acc[TM][TN];
-
     #pragma unroll
     for (int m = 0; m < TM; m++) {
         #pragma unroll
@@ -197,91 +276,52 @@ void tiled_gemm_vectorized_kernel_v3(float const* __restrict__ A,
     // Number of threads in the participating block.
     const int num_block_threads = blockDim.x * blockDim.y;
     auto pipeline = cuda::make_pipeline();
+    const int num_k_tiles = (K + BK - 1) / BK;
+    for (int k_tile = 0; k_tile < num_k_tiles; ++k_tile) {
+        auto gA = cute::local_tile(mA,
+            cute::Shape<cute::Int<BM>, cute::Int<BK>>{},
+            cute::make_coord(static_cast<int>(block_index.y), k_tile));
 
-    // Iterate over K in BK-sized chunks.
-    for (int k0 = 0; k0 < K; k0 += BK) {
-
-        // Load tile A. All threads in the block load consecutive addresses. This
-        // coalesces memory accesses assuming row-major storage. Each thread with
-        // tid=T would load (T, T+B, T+2B,...) where B is the number of threads.
-        for (int vec_index = tid; vec_index < BM * A_VEC_COLS; vec_index += num_block_threads) {
-            const int smem_col = vec_index / A_VEC_COLS;
-            const int smem_vec_row = vec_index % A_VEC_COLS;
-            const int smem_row = smem_vec_row * VEC;
-            const int global_row = block_row + smem_col;
-            const int global_col = k0 + smem_row;
-            if (global_row < M && global_col < K) {
-                const auto *src = reinterpret_cast<const float4*>(A + global_row*K + global_col);
-                As[swizzle<3,2,7>((smem_row+0)*BM + smem_col)] = src->x;
-                As[swizzle<3,2,7>((smem_row+1)*BM + smem_col)] = src->y;
-                As[swizzle<3,2,7>((smem_row+2)*BM + smem_col)] = src->z;
-                As[swizzle<3,2,7>((smem_row+3)*BM + smem_col)] = src->w;
-            }
-        }
+        auto gB = cute::local_tile(mB,
+            cute::Shape<cute::Int<BK>, cute::Int<BN>>{},
+            cute::make_coord(k_tile, static_cast<int>(block_index.x)));
 
         pipeline.producer_acquire();
-        for (int vec_index = tid; vec_index < BK * B_VEC_COLS; vec_index += num_block_threads) {
-            const int smem_row = vec_index / B_VEC_COLS;
-            const int smem_vec_col = vec_index % B_VEC_COLS;
-            const int smem_col = smem_vec_col * VEC;
-            const int smem_physical = swizzle<1,2,3>(smem_row*BN + smem_col);
-            const int global_row = k0 + smem_row;
-            const int global_col = block_col + smem_col;
-            auto* dst = reinterpret_cast<float4*>(&Bs[smem_physical]);
-            if (global_row < K && global_col < N) {
-                const auto *src = reinterpret_cast<const float4*>(B + global_row*N + global_col);
-                cuda::memcpy_async(dst, src, cuda::aligned_size_t<16>(sizeof(float4)), pipeline);
-            } else {
-                *dst = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-            }
-        }
+        stage_b_async<BN,BK>(gB, sB, tid, num_block_threads, pipeline);
         pipeline.producer_commit();
+
+        stage_a<BM,BK>(gA, sA, tid, num_block_threads);
+
         pipeline.consumer_wait();
         pipeline.consumer_release();
+        block.sync(); // -- wait until staging is finished
 
-        block.sync();
-
-        const int valid_k = (BK < (K-k0)) ? BK : (K-k0);
-        for (int k = 0; k < valid_k; ++k) {
+        for (int k = 0; k < BK; ++k) {
             float b_frag[TN], a_frag[TM];
-            AFragmentLoader<TM,BM>::load(As, k, ty, a_frag);
-            BFragmentLoader<TN,BN>::load(Bs, k, tx, b_frag);
-
-            #pragma unroll
-            for (int m = 0; m < TM; ++m) {
-                const float a = a_frag[m];
-                #pragma unroll
-                for (int n = 0; n < TN; ++n) {
-                    acc[m][n] += a * b_frag[n];
-                }
-            }
+            AFragmentLoader<TM>::load(sA, k, ty*TM, a_frag);
+            BFragmentLoader<TN>::load(sB, k, tx*TN, b_frag);
+            Multiplier<TM,TN>::multiply(a_frag, b_frag, acc);
         }
-        block.sync();
+        block.sync(); // -- wait until current multiplication is finished
     }
 
     // Store the register tile
-    const int max_valid_m = TM < (M-threadblock_row) ? TM : (M-threadblock_row);
-    const int max_valid_n = TN < (N-threadblock_col) ? TN : (N-threadblock_col);
+    const int local_m = ty * TM;
+    const int local_n = tx * TN;
 
-    if (threadblock_col + TN <= N) {
+    const int global_m_base = static_cast<int>(block_index.y) * BM;
+    const int global_n_base = static_cast<int>(block_index.x) * BN;
+
+    #pragma unroll
+    for (int m = 0; m < TM; m++) {
+        const int global_m = global_m_base + local_m + m;
+        if (global_m >= M) continue;
+
         #pragma unroll
-        for (int m = 0; m < max_valid_m; m++) {
-            const int global_row = threadblock_row + m;
-            #pragma unroll
-            for (int n = 0; n < TN; n += STORE_VEC) {
-                const float4 value = make_float4(acc[m][n], acc[m][n+1], acc[m][n+2], acc[m][n+3]);
-                auto* dst = reinterpret_cast<float4*>(C + global_row*N + threadblock_col + n);
-                *dst = value;
-            }
-        }
-    } else {
-        #pragma unroll
-        for (int m = 0; m < max_valid_m; m++) {
-            const int global_row = threadblock_row + m;
-            #pragma unroll
-            for (int n = 0; n < max_valid_n; n++) {
-                const int global_col = threadblock_col + n;
-                C[global_row * N + global_col] = acc[m][n];
+        for (int n = 0; n < TN; n++) {
+            const int global_n = global_n_base + local_n + n;
+            if (global_n < N) {
+                gC(local_m + m, local_n + n) = acc[m][n];
             }
         }
     }
